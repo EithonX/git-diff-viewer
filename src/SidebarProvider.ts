@@ -1,104 +1,124 @@
 import * as vscode from "vscode";
 import { exec } from "child_process";
 
+/**
+ * Provides the webview content for the Git Diff Viewer sidebar.
+ */
 export class SidebarProvider implements vscode.WebviewViewProvider {
-    private _view?: vscode.WebviewView;
+  private _view?: vscode.WebviewView;
 
-    constructor(private readonly _extensionUri: vscode.Uri) { }
+  /**
+   * Initializes the SidebarProvider.
+   * @param _extensionUri The URI of the extension providing the webview.
+   */
+  constructor(private readonly _extensionUri: vscode.Uri) { }
 
-    public resolveWebviewView(
-        webviewView: vscode.WebviewView,
-        _context: vscode.WebviewViewResolveContext,
-        _token: vscode.CancellationToken
-    ) {
-        this._view = webviewView;
+  /**
+   * Resolves the webview view. Called when the view first becomes visible.
+   * @param webviewView The webview view to resolve.
+   * @param _context Additional context.
+   * @param _token A cancellation token.
+   */
+  public resolveWebviewView(
+    webviewView: vscode.WebviewView,
+    _context: vscode.WebviewViewResolveContext,
+    _token: vscode.CancellationToken
+  ) {
+    this._view = webviewView;
 
-        webviewView.webview.options = {
-            enableScripts: true,
-            localResourceRoots: [this._extensionUri],
-        };
+    webviewView.webview.options = {
+      enableScripts: true,
+      localResourceRoots: [this._extensionUri],
+    };
 
-        webviewView.webview.html = this._getHtml();
+    webviewView.webview.html = this._getHtml();
 
-        webviewView.webview.onDidReceiveMessage(async (message) => {
-            switch (message.command) {
-                case "loadDiff": {
-                    const workspaceFolders = vscode.workspace.workspaceFolders;
-                    if (!workspaceFolders || workspaceFolders.length === 0) {
-                        webviewView.webview.postMessage({
+    webviewView.webview.onDidReceiveMessage(async (message) => {
+      switch (message.command) {
+        case "loadDiff": {
+          const workspaceFolders = vscode.workspace.workspaceFolders;
+          if (!workspaceFolders || workspaceFolders.length === 0) {
+            webviewView.webview.postMessage({
+              command: "diffResult",
+              success: false,
+              data: "No workspace folder is open.",
+            });
+            return;
+          }
+
+          const cwd = workspaceFolders[0].uri.fsPath;
+          const gitFlags = "--no-pager diff --no-ext-diff --no-color";
+
+          // FIX: Register untracked files with "Intent to Add" (-N) so git diff detects them
+          exec(`git add -N .`, { cwd }, () => {
+
+            // Now run the actual diff
+            exec(
+              `git ${gitFlags} HEAD`,
+              { cwd, maxBuffer: 1024 * 1024 * 10 },
+              (error, stdout, stderr) => {
+                if (error) {
+                  // Fallback for brand new repos with no commits yet
+                  if (stderr && stderr.includes("ambiguous argument 'HEAD'")) {
+                    exec(
+                      `git ${gitFlags}`,
+                      { cwd, maxBuffer: 1024 * 1024 * 10 },
+                      (err2, stdout2, stderr2) => {
+                        if (err2) {
+                          webviewView.webview.postMessage({
                             command: "diffResult",
                             success: false,
-                            data: "No workspace folder is open.",
-                        });
-                        return;
-                    }
-
-                    const cwd = workspaceFolders[0].uri.fsPath;
-                    const gitFlags = "--no-pager diff --no-ext-diff --no-color";
-
-                    exec(
-                        `git ${gitFlags} HEAD`,
-                        { cwd, maxBuffer: 1024 * 1024 * 10 },
-                        (error, stdout, stderr) => {
-                            if (error) {
-                                if (stderr && stderr.includes("ambiguous argument 'HEAD'")) {
-                                    exec(
-                                        `git ${gitFlags}`,
-                                        { cwd, maxBuffer: 1024 * 1024 * 10 },
-                                        (err2, stdout2, stderr2) => {
-                                            if (err2) {
-                                                webviewView.webview.postMessage({
-                                                    command: "diffResult",
-                                                    success: false,
-                                                    data: stderr2 || err2.message,
-                                                });
-                                                return;
-                                            }
-                                            webviewView.webview.postMessage({
-                                                command: "diffResult",
-                                                success: true,
-                                                data: stdout2 || "(no changes)",
-                                            });
-                                        }
-                                    );
-                                    return;
-                                }
-                                webviewView.webview.postMessage({
-                                    command: "diffResult",
-                                    success: false,
-                                    data: stderr || error.message,
-                                });
-                                return;
-                            }
-
-                            webviewView.webview.postMessage({
-                                command: "diffResult",
-                                success: true,
-                                data: stdout || "(no changes)",
-                            });
+                            data: stderr2 || err2.message,
+                          });
+                          return;
                         }
+                        webviewView.webview.postMessage({
+                          command: "diffResult",
+                          success: true,
+                          data: stdout2 || "(no changes)",
+                        });
+                      }
                     );
-                    break;
+                    return;
+                  }
+
+                  webviewView.webview.postMessage({
+                    command: "diffResult",
+                    success: false,
+                    data: stderr || error.message,
+                  });
+                  return;
                 }
 
-                case "copyDiff": {
-                    if (message.data) {
-                        await vscode.env.clipboard.writeText(message.data);
-                        vscode.window.showInformationMessage("Diff copied to clipboard!");
-                    }
-                    break;
-                }
+                webviewView.webview.postMessage({
+                  command: "diffResult",
+                  success: true,
+                  data: stdout || "(no changes)",
+                });
+              }
+            );
+          });
+          break;
+        }
 
-                case "showError": {
-                    vscode.window.showErrorMessage(message.data);
-                    break;
-                }
-            }
-        });
-    }
+        case "copyDiff": {
+          if (message.data) {
+            await vscode.env.clipboard.writeText(message.data);
+            vscode.window.showInformationMessage("Diff copied to clipboard!");
+          }
+          break;
+        }
 
-    private _getHtml(): string {
-        return /*html*/ `
+        case "showError": {
+          vscode.window.showErrorMessage(message.data);
+          break;
+        }
+      }
+    });
+  }
+
+  private _getHtml(): string {
+    return /*html*/ `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -503,5 +523,5 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   </script>
 </body>
 </html>`;
-    }
+  }
 }
