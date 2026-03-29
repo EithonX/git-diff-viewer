@@ -1,0 +1,39 @@
+name: Release Extension
+
+on:
+  push:
+    tags:
+      - 'v*' # This triggers the workflow only when you push a tag like "v1.0.0"
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # Grants the action permission to create a GitHub Release
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20' # Matches your package.json devDependencies
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Package Extension
+        # vsce automatically runs 'npm run compile' because of your prepublish script
+        run: npx vsce package --allow-missing-repository
+
+      - name: Find VSIX file
+        id: get_vsix
+        # Grabs the exact name of the generated vsix file to pass to the next step
+        run: echo "VSIX_FILE=$(ls *.vsix | head -n 1)" >> $GITHUB_ENV
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.VSIX_FILE }}
+          generate_release_notes: true # Auto-generates a changelog based on your commits
