@@ -21,7 +21,7 @@ jobs:
           node-version: '20' # Matches your package.json devDependencies
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Package Extension
         # vsce automatically runs 'npm run compile' because of your prepublish script
