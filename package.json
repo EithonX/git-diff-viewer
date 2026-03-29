@@ -3,7 +3,11 @@
     "displayName": "Git Diff Viewer",
     "description": "Load and copy git diff output from the sidebar",
     "version": "1.0.0",
-    "publisher": "your-name",
+    "publisher": "EithonX",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/EithonX/git-diff-viewer"
+    },
     "engines": {
         "vscode": "^1.85.0"
     },
