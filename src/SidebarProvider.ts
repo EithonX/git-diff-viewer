@@ -35,11 +35,41 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
                     const cwd = workspaceFolders[0].uri.fsPath;
 
+                    // Added --no-ext-diff to prevent external GUI diffs from hanging the process
+                    // Added --no-color to prevent ANSI escape codes from breaking the text parser
+                    const gitFlags = "--no-pager diff --no-ext-diff --no-color";
+
+                    // Try diffing against HEAD first (Captures BOTH staged and unstaged changes)
                     exec(
-                        "git --no-pager diff",
+                        `git ${gitFlags} HEAD`,
                         { cwd, maxBuffer: 1024 * 1024 * 10 },
                         (error, stdout, stderr) => {
                             if (error) {
+                                // Fallback: If 'HEAD' doesn't exist (e.g., brand new repo with no commits)
+                                if (stderr && stderr.includes("ambiguous argument 'HEAD'")) {
+                                    exec(
+                                        `git ${gitFlags}`,
+                                        { cwd, maxBuffer: 1024 * 1024 * 10 },
+                                        (err2, stdout2, stderr2) => {
+                                            if (err2) {
+                                                webviewView.webview.postMessage({
+                                                    command: "diffResult",
+                                                    success: false,
+                                                    data: stderr2 || err2.message,
+                                                });
+                                                return;
+                                            }
+                                            webviewView.webview.postMessage({
+                                                command: "diffResult",
+                                                success: true,
+                                                data: stdout2 || "(no changes)",
+                                            });
+                                        }
+                                    );
+                                    return;
+                                }
+
+                                // Standard error (e.g., not a git repository)
                                 webviewView.webview.postMessage({
                                     command: "diffResult",
                                     success: false,
@@ -61,9 +91,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 case "copyDiff": {
                     if (message.data) {
                         await vscode.env.clipboard.writeText(message.data);
-                        vscode.window.showInformationMessage(
-                            "Diff copied to clipboard!"
-                        );
+                        vscode.window.showInformationMessage("Diff copied to clipboard!");
                     }
                     break;
                 }
@@ -468,10 +496,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       diffOutput.style.display = 'block';
       diffOutput.innerHTML     = '';
 
-      if (text === '(no changes)') {
+      if (text.trim() === '(no changes)') {
         emptyState.querySelector('.empty-icon').textContent = '✅';
         emptyState.querySelector('p').innerHTML =
-          'Working tree is clean.<br/>No unstaged changes.';
+          'Working tree is clean.<br/>No unstaged or staged changes.';
         emptyState.style.display = 'flex';
         diffOutput.style.display = 'none';
         statsRow.style.display   = 'none';
@@ -482,17 +510,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       let deletions = 0;
       const filesSet = new Set();
 
-      const lines = text.split('\\n');
+      // Fix: Safely split on both Windows (\\r\\n) and Unix (\\n) line endings
+      const lines = text.split(/\\r?\\n/);
 
       lines.forEach((line) => {
+        if (line === undefined) return;
+        
         const el = document.createElement('div');
         el.classList.add('line');
         el.textContent = line;
 
         if (line.startsWith('+++') || line.startsWith('---')) {
           el.classList.add('line-header');
-          const match = line.match(/^(?:\\+\\+\\+|---) [ab]\\/(.+)/);
-          if (match) filesSet.add(match[1]);
+          // Fix: Handles standard 'a/file', no-prefix 'file' custom git configs
+          const match = line.match(/^(?:\\+\\+\\+|---) (?:[ab]\\/)?(.*)/);
+          if (match) {
+            const fileName = match[1].trim();
+            // Fix: Ignore Git's standard marker for newly created or fully deleted files
+            if (fileName !== '/dev/null' && fileName !== 'dev/null') {
+                filesSet.add(fileName);
+            }
+          }
         } else if (line.startsWith('@@')) {
           el.classList.add('line-hunk');
         } else if (line.startsWith('+')) {
