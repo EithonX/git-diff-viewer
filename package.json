@@ -1,0 +1,46 @@
+{
+    "name": "git-diff-viewer",
+    "displayName": "Git Diff Viewer",
+    "description": "Load and copy git diff output from the sidebar",
+    "version": "1.0.0",
+    "publisher": "your-name",
+    "engines": {
+        "vscode": "^1.85.0"
+    },
+    "categories": [
+        "Other"
+    ],
+    "activationEvents": [],
+    "main": "./out/extension.js",
+    "icon": "media/icon.png",
+    "contributes": {
+        "viewsContainers": {
+            "activitybar": [
+                {
+                    "id": "gitDiffViewer",
+                    "title": "Git Diff Viewer",
+                    "icon": "media/icon.svg"
+                }
+            ]
+        },
+        "views": {
+            "gitDiffViewer": [
+                {
+                    "type": "webview",
+                    "id": "gitDiffViewer.sidebar",
+                    "name": "Diff"
+                }
+            ]
+        }
+    },
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./"
+    },
+    "devDependencies": {
+        "@types/vscode": "^1.85.0",
+        "@types/node": "^20.10.0",
+        "typescript": "^5.3.2"
+    }
+}
