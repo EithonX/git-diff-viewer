@@ -34,18 +34,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     }
 
                     const cwd = workspaceFolders[0].uri.fsPath;
-
-                    // Added --no-ext-diff to prevent external GUI diffs from hanging the process
-                    // Added --no-color to prevent ANSI escape codes from breaking the text parser
                     const gitFlags = "--no-pager diff --no-ext-diff --no-color";
 
-                    // Try diffing against HEAD first (Captures BOTH staged and unstaged changes)
                     exec(
                         `git ${gitFlags} HEAD`,
                         { cwd, maxBuffer: 1024 * 1024 * 10 },
                         (error, stdout, stderr) => {
                             if (error) {
-                                // Fallback: If 'HEAD' doesn't exist (e.g., brand new repo with no commits)
                                 if (stderr && stderr.includes("ambiguous argument 'HEAD'")) {
                                     exec(
                                         `git ${gitFlags}`,
@@ -68,8 +63,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                                     );
                                     return;
                                 }
-
-                                // Standard error (e.g., not a git repository)
                                 webviewView.webview.postMessage({
                                     command: "diffResult",
                                     success: false,
@@ -112,196 +105,173 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Git Diff Viewer</title>
+  <link href="https://cdn.jsdelivr.net/npm/@vscode/codicons/dist/codicon.css" rel="stylesheet" />
   <style>
-    /* ── Reset ───────────────────────────────────── */
-    *,
-    *::before,
-    *::after {
-      margin: 0;
-      padding: 0;
-      box-sizing: border-box;
-    }
-
+    /* ── Reset & Variables ──────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    
     body {
+      margin: 0;
       font-family: var(--vscode-font-family);
       font-size: var(--vscode-font-size);
       color: var(--vscode-foreground);
       background: var(--vscode-sideBar-background);
-      padding: 0;
       height: 100vh;
       display: flex;
       flex-direction: column;
       overflow: hidden;
     }
 
-    /* ── Header ──────────────────────────────────── */
-    .header {
-      padding: 16px 14px 12px;
+    /* ── Header Area ────────────────────────────── */
+    .header-container {
+      background: var(--vscode-sideBar-background);
       border-bottom: 1px solid var(--vscode-panel-border);
+      z-index: 10;
+    }
+
+    .header {
+      padding: 12px 14px;
     }
 
     .header h2 {
-      font-size: 13px;
+      font-size: 11px;
       font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
-      color: var(--vscode-foreground);
-      margin-bottom: 14px;
+      color: var(--vscode-sideBarTitle-foreground);
+      margin: 0 0 12px 0;
       display: flex;
       align-items: center;
-      gap: 7px;
+      gap: 6px;
+      letter-spacing: 0.5px;
     }
 
-    .header h2 .icon {
-      font-size: 16px;
-      line-height: 1;
-    }
-
-    /* ── Buttons ─────────────────────────────────── */
-    .btn-row {
-      display: flex;
-      gap: 8px;
-    }
-
+    /* ── Buttons ────────────────────────────────── */
+    .btn-row { display: flex; gap: 8px; }
     .btn {
       flex: 1;
       display: flex;
       align-items: center;
       justify-content: center;
       gap: 6px;
-      padding: 8px 12px;
-      border: none;
-      border-radius: 4px;
-      font-family: var(--vscode-font-family);
+      padding: 6px 12px;
+      border: 1px solid transparent;
+      border-radius: 2px;
+      font-family: inherit;
       font-size: 12px;
-      font-weight: 500;
       cursor: pointer;
-      transition: opacity 0.15s, background 0.15s;
+      transition: all 0.1s;
       outline: none;
     }
-
-    .btn:hover {
-      opacity: 0.92;
-    }
-
-    .btn:active {
-      transform: scale(0.98);
-    }
-
+    .btn:active { transform: translateY(1px); }
+    
     .btn-primary {
       background: var(--vscode-button-background);
       color: var(--vscode-button-foreground);
     }
-
-    .btn-primary:hover {
-      background: var(--vscode-button-hoverBackground);
-    }
-
+    .btn-primary:hover { background: var(--vscode-button-hoverBackground); }
+    
     .btn-secondary {
       background: var(--vscode-button-secondaryBackground);
       color: var(--vscode-button-secondaryForeground);
     }
+    .btn-secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
 
-    .btn-secondary:hover {
-      background: var(--vscode-button-secondaryHoverBackground);
-    }
-
-    .btn:disabled {
-      opacity: 0.45;
-      cursor: not-allowed;
-    }
-
-    .btn svg {
-      width: 14px;
-      height: 14px;
-      fill: currentColor;
-    }
-
-    /* ── Status Bar ──────────────────────────────── */
+    /* ── Status Bar ─────────────────────────────── */
     .status-bar {
-      padding: 8px 14px;
+      padding: 6px 14px;
       font-size: 11px;
       color: var(--vscode-descriptionForeground);
       display: flex;
       align-items: center;
       gap: 6px;
-      min-height: 32px;
+      background: var(--vscode-editor-background);
+      border-bottom: 1px solid var(--vscode-panel-border);
     }
+    .codicon-sync.loading { animation: spin 1s linear infinite; color: var(--vscode-textLink-foreground); }
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+    .status-success { color: var(--vscode-testing-iconPassed); }
+    .status-error { color: var(--vscode-testing-iconFailed); }
 
-    .status-bar .dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: var(--vscode-descriptionForeground);
-      flex-shrink: 0;
-    }
-
-    .status-bar .dot.success {
-      background: var(--vscode-testing-iconPassed, #4ec94e);
-    }
-
-    .status-bar .dot.error {
-      background: var(--vscode-testing-iconFailed, #f44747);
-    }
-
-    .status-bar .dot.loading {
-      background: var(--vscode-progressBar-background, #0078d4);
-      animation: pulse 1s ease-in-out infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
-
-    /* ── Diff Output ─────────────────────────────── */
+    /* ── Diff Output Container ──────────────────── */
     .diff-container {
       flex: 1;
-      overflow: auto;
-      padding: 0;
+      overflow-y: auto;
+      overflow-x: auto;
+      background: var(--vscode-editor-background);
       position: relative;
     }
 
+    /* ── Diff Editor Typography & Layout ────────── */
     .diff-output {
       font-family: var(--vscode-editor-font-family, 'Consolas', 'Courier New', monospace);
       font-size: var(--vscode-editor-font-size, 13px);
-      line-height: 1.55;
+      line-height: 1.4;
+      min-width: max-content;
+      padding-bottom: 20px;
+    }
+
+    .line {
+      display: flex;
+      width: 100%;
+    }
+
+    .line-gutter {
+      width: 32px;
+      min-width: 32px;
+      padding-right: 8px;
+      text-align: right;
+      color: var(--vscode-lineNumbers-foreground, #858585);
+      user-select: none;
+      display: flex;
+      justify-content: flex-end;
+      align-items: center;
+    }
+
+    .line-content {
+      padding-left: 12px;
+      padding-right: 14px;
       white-space: pre;
-      padding: 10px 14px;
-      min-height: 100%;
+      flex: 1;
     }
 
-    .diff-output .line {
-      padding: 0 4px;
-      border-radius: 2px;
+    /* ── Diff Line Colors ───────────────────────── */
+    .line-add {
+      background-color: var(--vscode-diffEditor-insertedTextBackground, rgba(46, 160, 67, 0.15));
     }
-
-    .diff-output .line-add {
-      background: rgba(72, 199, 103, 0.13);
-      color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
-    }
-
-    .diff-output .line-remove {
-      background: rgba(247, 70, 70, 0.13);
-      color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
-    }
-
-    .diff-output .line-hunk {
-      color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
-      font-weight: 600;
-      margin-top: 6px;
-    }
-
-    .diff-output .line-header {
-      color: var(--vscode-descriptionForeground);
-      font-weight: 600;
-    }
-
-    .diff-output .line-normal {
+    .line-add .line-content {
       color: var(--vscode-editor-foreground);
     }
 
-    /* ── Empty State ─────────────────────────────── */
+    .line-remove {
+      background-color: var(--vscode-diffEditor-removedTextBackground, rgba(248, 81, 73, 0.15));
+    }
+    .line-remove .line-content {
+      color: var(--vscode-editor-foreground);
+    }
+
+    .line-hunk {
+      background-color: var(--vscode-diffEditor-diagonalFill, rgba(0, 122, 204, 0.2));
+      color: var(--vscode-textLink-foreground);
+      margin-top: 10px;
+      padding-top: 4px;
+      padding-bottom: 4px;
+    }
+    
+    .line-file-header {
+      font-weight: bold;
+      color: var(--vscode-textPreformat-foreground);
+      background: var(--vscode-editorGroupHeader-tabsBackground);
+      margin-top: 16px;
+      padding: 6px 0;
+      border-top: 1px solid var(--vscode-panel-border);
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+
+    .line-normal { color: var(--vscode-editor-foreground); }
+    
+    /* ── Empty State ────────────────────────────── */
     .empty-state {
       display: flex;
       flex-direction: column;
@@ -312,114 +282,78 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       text-align: center;
       color: var(--vscode-descriptionForeground);
     }
-
-    .empty-state .empty-icon {
-      font-size: 38px;
-      margin-bottom: 14px;
-      opacity: 0.5;
+    .empty-icon { font-size: 48px !important; margin-bottom: 16px; opacity: 0.6; }
+    .empty-state p { font-size: 13px; line-height: 1.5; margin: 0; }
+    .empty-state code { 
+      background: var(--vscode-textCodeBlock-background); 
+      padding: 2px 4px; 
+      border-radius: 3px;
     }
 
-    .empty-state p {
-      font-size: 12px;
-      line-height: 1.6;
-      max-width: 200px;
-    }
-
-    /* ── Stats Row ───────────────────────────────── */
+    /* ── Stats Row ──────────────────────────────── */
     .stats-row {
       display: flex;
-      gap: 12px;
+      gap: 16px;
       padding: 8px 14px;
+      background: var(--vscode-sideBar-background);
       border-top: 1px solid var(--vscode-panel-border);
       font-size: 11px;
       color: var(--vscode-descriptionForeground);
       flex-shrink: 0;
     }
+    .stat { display: flex; align-items: center; gap: 4px; }
+    .stat i { font-size: 12px; }
+    .stat-add { color: var(--vscode-gitDecoration-addedResourceForeground); }
+    .stat-del { color: var(--vscode-gitDecoration-deletedResourceForeground); }
+    .stat-file { color: var(--vscode-gitDecoration-modifiedResourceForeground); }
 
-    .stat {
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .stat .count {
-      font-weight: 600;
-    }
-
-    .stat.additions .count {
-      color: var(--vscode-gitDecoration-addedResourceForeground, #81b88b);
-    }
-
-    .stat.deletions .count {
-      color: var(--vscode-gitDecoration-deletedResourceForeground, #c74e39);
-    }
-
-    .stat.files .count {
-      color: var(--vscode-gitDecoration-modifiedResourceForeground, #e2c08d);
-    }
-
-    /* ── Scrollbar ───────────────────────────────── */
-    .diff-container::-webkit-scrollbar {
-      width: 8px;
-      height: 8px;
-    }
-    .diff-container::-webkit-scrollbar-track {
-      background: transparent;
-    }
-    .diff-container::-webkit-scrollbar-thumb {
-      background: var(--vscode-scrollbarSlider-background);
-      border-radius: 4px;
-    }
-    .diff-container::-webkit-scrollbar-thumb:hover {
-      background: var(--vscode-scrollbarSlider-hoverBackground);
-    }
+    /* ── Scrollbars ─────────────────────────────── */
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-corner { background: transparent; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: var(--vscode-scrollbarSlider-background); }
+    ::-webkit-scrollbar-thumb:hover { background: var(--vscode-scrollbarSlider-hoverBackground); }
+    ::-webkit-scrollbar-thumb:active { background: var(--vscode-scrollbarSlider-activeBackground); }
   </style>
 </head>
 <body>
 
-  <div class="header">
-    <h2>
-      <span class="icon">⎇</span> Git Diff
-    </h2>
-    <div class="btn-row">
-      <button class="btn btn-primary" id="btnLoad">
-        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-          <path d="M13.5 2H2.5C1.67 2 1 2.67 1 3.5v9c0 .83.67 1.5 1.5 1.5h11c.83 0 1.5-.67 1.5-1.5v-9c0-.83-.67-1.5-1.5-1.5zM8 11L4 7h2.5V4h3v3H12L8 11z"/>
-        </svg>
-        Load Diff
-      </button>
-      <button class="btn btn-secondary" id="btnCopy" disabled>
-        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-          <path d="M4 4v-2.5c0-.83.67-1.5 1.5-1.5h7c.83 0 1.5.67 1.5 1.5v9c0 .83-.67 1.5-1.5 1.5H11v1.5c0 .83-.67 1.5-1.5 1.5h-7c-.83 0-1.5-.67-1.5-1.5v-9c0-.83.67-1.5 1.5-1.5H4zm1 0h5.5c.83 0 1.5.67 1.5 1.5V11h.5a.5.5 0 00.5-.5v-9a.5.5 0 00-.5-.5h-7a.5.5 0 00-.5.5V4zm-2.5 1a.5.5 0 00-.5.5v9a.5.5 0 00.5.5h7a.5.5 0 00.5-.5v-9a.5.5 0 00-.5-.5h-7z"/>
-        </svg>
-        Copy
-      </button>
+  <div class="header-container">
+    <div class="header">
+      <h2><i class="codicon codicon-git-compare"></i> Workspace Diff</h2>
+      <div class="btn-row">
+        <button class="btn btn-primary" id="btnLoad">
+          <i class="codicon codicon-refresh"></i> Load
+        </button>
+        <button class="btn btn-secondary" id="btnCopy" disabled>
+          <i class="codicon codicon-copy"></i> Copy
+        </button>
+      </div>
     </div>
-  </div>
-
-  <div class="status-bar" id="statusBar">
-    <span class="dot"></span>
-    <span id="statusText">Click <strong>Load Diff</strong> to begin</span>
+    <div class="status-bar" id="statusBar">
+      <i class="codicon codicon-info" id="statusIcon"></i>
+      <span id="statusText">Ready to load diff</span>
+    </div>
   </div>
 
   <div class="diff-container" id="diffContainer">
     <div class="empty-state" id="emptyState">
-      <div class="empty-icon">📄</div>
-      <p>No diff loaded yet.<br/>Hit <strong>Load Diff</strong> to run
-      <code>git diff</code> on your workspace.</p>
+      <i class="codicon codicon-file-code empty-icon"></i>
+      <p>No diff loaded.</p>
+      <p style="margin-top: 4px; opacity: 0.8;">Click Load to run <code>git diff HEAD</code></p>
     </div>
     <div class="diff-output" id="diffOutput" style="display:none;"></div>
   </div>
 
   <div class="stats-row" id="statsRow" style="display:none;">
-    <div class="stat files">
-      <span class="count" id="statFiles">0</span> files
+    <div class="stat stat-file">
+      <i class="codicon codicon-files"></i> <span id="statFiles">0</span>
     </div>
-    <div class="stat additions">
-      <span>+</span><span class="count" id="statAdd">0</span>
+    <div class="stat stat-add">
+      <i class="codicon codicon-add"></i> <span id="statAdd">0</span>
     </div>
-    <div class="stat deletions">
-      <span>−</span><span class="count" id="statDel">0</span>
+    <div class="stat stat-del">
+      <i class="codicon codicon-remove"></i> <span id="statDel">0</span>
     </div>
   </div>
 
@@ -430,9 +364,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const btnCopy    = document.getElementById('btnCopy');
     const diffOutput = document.getElementById('diffOutput');
     const emptyState = document.getElementById('emptyState');
-    const statusBar  = document.getElementById('statusBar');
+    const statusIcon = document.getElementById('statusIcon');
     const statusText = document.getElementById('statusText');
-    const statusDot  = statusBar.querySelector('.dot');
     const statsRow   = document.getElementById('statsRow');
     const statFiles  = document.getElementById('statFiles');
     const statAdd    = document.getElementById('statAdd');
@@ -440,7 +373,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     let rawDiff = '';
 
-    /* ── Button handlers ──────────────────────── */
+    function setStatus(iconClass, text, colorClass = '') {
+      statusIcon.className = \`codicon \${iconClass} \${colorClass}\`;
+      statusText.textContent = text;
+    }
+
     btnLoad.addEventListener('click', () => {
       rawDiff = '';
       btnCopy.disabled = true;
@@ -448,9 +385,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       emptyState.style.display = 'none';
       statsRow.style.display   = 'none';
 
-      statusDot.className = 'dot loading';
-      statusText.innerHTML = 'Running <code>git diff</code>…';
-
+      setStatus('codicon-sync loading', 'Analyzing workspace...');
       vscode.postMessage({ command: 'loadDiff' });
     });
 
@@ -458,18 +393,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (!rawDiff) return;
       vscode.postMessage({ command: 'copyDiff', data: rawDiff });
 
-      // visual feedback
-      const prev = btnCopy.innerHTML;
-      btnCopy.innerHTML =
-        '<svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg"><path fill="currentColor" d="M6.27 10.87l-2.13-2.14-.71.71L6.27 12.3l7.04-7.04-.71-.7z"/></svg> Copied!';
+      const prevHtml = btnCopy.innerHTML;
+      btnCopy.innerHTML = '<i class="codicon codicon-check"></i> Copied';
       btnCopy.disabled = true;
       setTimeout(() => {
-        btnCopy.innerHTML = prev;
+        btnCopy.innerHTML = prevHtml;
         btnCopy.disabled = false;
       }, 1500);
     });
 
-    /* ── Receive messages ─────────────────────── */
     window.addEventListener('message', (event) => {
       const msg = event.data;
       if (msg.command === 'diffResult') {
@@ -477,12 +409,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           rawDiff = msg.data;
           renderDiff(rawDiff);
           btnCopy.disabled = false;
-          statusDot.className = 'dot success';
-          statusText.textContent = 'Diff loaded successfully';
+          setStatus('codicon-check', 'Diff loaded successfully', 'status-success');
         } else {
           rawDiff = '';
-          statusDot.className = 'dot error';
-          statusText.textContent = 'Error: ' + msg.data;
+          setStatus('codicon-error', 'Error loading diff', 'status-error');
+          emptyState.querySelector('.empty-icon').className = 'codicon codicon-warning empty-icon';
+          emptyState.querySelector('p').textContent = msg.data;
           emptyState.style.display = 'flex';
           diffOutput.style.display = 'none';
           statsRow.style.display   = 'none';
@@ -490,62 +422,77 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
     });
 
-    /* ── Render diff with highlighting ────────── */
+    function createLine(gutterText, contentText, typeClass) {
+      const el = document.createElement('div');
+      el.className = \`line \${typeClass}\`;
+      
+      const gutter = document.createElement('div');
+      gutter.className = 'line-gutter';
+      gutter.textContent = gutterText;
+      
+      const content = document.createElement('div');
+      content.className = 'line-content';
+      content.textContent = contentText;
+
+      el.appendChild(gutter);
+      el.appendChild(content);
+      return el;
+    }
+
     function renderDiff(text) {
       emptyState.style.display = 'none';
       diffOutput.style.display = 'block';
       diffOutput.innerHTML     = '';
 
       if (text.trim() === '(no changes)') {
-        emptyState.querySelector('.empty-icon').textContent = '✅';
-        emptyState.querySelector('p').innerHTML =
-          'Working tree is clean.<br/>No unstaged or staged changes.';
+        emptyState.querySelector('.empty-icon').className = 'codicon codicon-pass-filled empty-icon status-success';
+        emptyState.querySelector('p').innerHTML = 'Working tree is clean.';
         emptyState.style.display = 'flex';
         diffOutput.style.display = 'none';
         statsRow.style.display   = 'none';
+        setStatus('codicon-check', 'Clean workspace', 'status-success');
         return;
       }
 
       let additions = 0;
       let deletions = 0;
       const filesSet = new Set();
-
-      // Fix: Safely split on both Windows (\\r\\n) and Unix (\\n) line endings
       const lines = text.split(/\\r?\\n/);
 
       lines.forEach((line) => {
-        if (line === undefined) return;
+        if (line === undefined || line === '') return;
         
-        const el = document.createElement('div');
-        el.classList.add('line');
-        el.textContent = line;
-
+        // Track stats
         if (line.startsWith('+++') || line.startsWith('---')) {
-          el.classList.add('line-header');
-          // Fix: Handles standard 'a/file', no-prefix 'file' custom git configs
           const match = line.match(/^(?:\\+\\+\\+|---) (?:[ab]\\/)?(.*)/);
-          if (match) {
-            const fileName = match[1].trim();
-            // Fix: Ignore Git's standard marker for newly created or fully deleted files
-            if (fileName !== '/dev/null' && fileName !== 'dev/null') {
-                filesSet.add(fileName);
-            }
+          if (match && match[1] !== '/dev/null' && match[1] !== 'dev/null') {
+            filesSet.add(match[1]);
           }
-        } else if (line.startsWith('@@')) {
-          el.classList.add('line-hunk');
-        } else if (line.startsWith('+')) {
-          el.classList.add('line-add');
-          additions++;
-        } else if (line.startsWith('-')) {
-          el.classList.add('line-remove');
-          deletions++;
-        } else if (line.startsWith('diff ')) {
-          el.classList.add('line-header');
-        } else {
-          el.classList.add('line-normal');
         }
 
-        diffOutput.appendChild(el);
+        // Render based on prefix
+        if (line.startsWith('+++') || line.startsWith('---') || line.startsWith('diff ') || line.startsWith('index ')) {
+          diffOutput.appendChild(createLine(' ', line, 'line-file-header'));
+        } 
+        else if (line.startsWith('@@')) {
+          diffOutput.appendChild(createLine(' ', line, 'line-hunk'));
+        } 
+        else if (line.startsWith('+')) {
+          additions++;
+          diffOutput.appendChild(createLine('+', line.substring(1), 'line-add'));
+        } 
+        else if (line.startsWith('-')) {
+          deletions++;
+          diffOutput.appendChild(createLine('-', line.substring(1), 'line-remove'));
+        } 
+        else if (line.startsWith(' ')) {
+          // Context line
+          diffOutput.appendChild(createLine(' ', line.substring(1), 'line-normal'));
+        } 
+        else {
+          // Catch all for weird git output
+          diffOutput.appendChild(createLine(' ', line, 'line-normal'));
+        }
       });
 
       statFiles.textContent = filesSet.size;
