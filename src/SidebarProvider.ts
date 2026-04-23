@@ -6,6 +6,8 @@ import { exec } from "child_process";
  */
 export class SidebarProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
+  private _latestDiff = "";
+  private _isViewReady = false;
 
   /**
    * Initializes the SidebarProvider.
@@ -25,6 +27,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     _token: vscode.CancellationToken
   ) {
     this._view = webviewView;
+    this._isViewReady = false;
 
     webviewView.webview.options = {
       enableScripts: true,
@@ -35,76 +38,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       switch (message.command) {
-        case "loadDiff": {
-          const workspaceFolders = vscode.workspace.workspaceFolders;
-          if (!workspaceFolders || workspaceFolders.length === 0) {
-            webviewView.webview.postMessage({
-              command: "diffResult",
-              success: false,
-              data: "No workspace folder is open.",
-            });
-            return;
+        case "ready": {
+          this._isViewReady = true;
+          if (webviewView.visible) {
+            this._loadDiff();
           }
+          break;
+        }
 
-          const cwd = workspaceFolders[0].uri.fsPath;
-          const gitFlags = "--no-pager diff --no-ext-diff --no-color";
-
-          // FIX: Register untracked files with "Intent to Add" (-N) so git diff detects them
-          exec(`git add -N .`, { cwd }, () => {
-
-            // Now run the actual diff
-            exec(
-              `git ${gitFlags} HEAD`,
-              { cwd, maxBuffer: 1024 * 1024 * 10 },
-              (error, stdout, stderr) => {
-                if (error) {
-                  // Fallback for brand new repos with no commits yet
-                  if (stderr && stderr.includes("ambiguous argument 'HEAD'")) {
-                    exec(
-                      `git ${gitFlags}`,
-                      { cwd, maxBuffer: 1024 * 1024 * 10 },
-                      (err2, stdout2, stderr2) => {
-                        if (err2) {
-                          webviewView.webview.postMessage({
-                            command: "diffResult",
-                            success: false,
-                            data: stderr2 || err2.message,
-                          });
-                          return;
-                        }
-                        webviewView.webview.postMessage({
-                          command: "diffResult",
-                          success: true,
-                          data: stdout2 || "(no changes)",
-                        });
-                      }
-                    );
-                    return;
-                  }
-
-                  webviewView.webview.postMessage({
-                    command: "diffResult",
-                    success: false,
-                    data: stderr || error.message,
-                  });
-                  return;
-                }
-
-                webviewView.webview.postMessage({
-                  command: "diffResult",
-                  success: true,
-                  data: stdout || "(no changes)",
-                });
-              }
-            );
-          });
+        case "loadDiff": {
+          this._loadDiff();
           break;
         }
 
         case "copyDiff": {
-          if (message.data) {
-            await vscode.env.clipboard.writeText(message.data);
+          if (this._latestDiff) {
+            await vscode.env.clipboard.writeText(this._latestDiff);
             vscode.window.showInformationMessage("Diff copied to clipboard!");
+          } else {
+            vscode.window.showWarningMessage("Load a diff before copying.");
           }
           break;
         }
@@ -114,6 +66,89 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           break;
         }
       }
+    });
+
+    webviewView.onDidChangeVisibility(() => {
+      if (webviewView.visible && this._isViewReady) {
+        this._loadDiff();
+      }
+    });
+  }
+
+  private _loadDiff() {
+    if (!this._view) {
+      return;
+    }
+
+    this._latestDiff = "";
+    this._view.webview.postMessage({ command: "loadingDiff" });
+
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) {
+      this._view.webview.postMessage({
+        command: "diffResult",
+        success: false,
+        data: "No workspace folder is open.",
+      });
+      return;
+    }
+
+    const cwd = workspaceFolders[0].uri.fsPath;
+    const gitFlags = "--no-pager diff --no-ext-diff --no-color";
+
+    // Register untracked files with "Intent to Add" (-N) so git diff detects them.
+    exec(`git add -N .`, { cwd }, () => {
+      exec(
+        `git ${gitFlags} HEAD`,
+        { cwd, maxBuffer: 1024 * 1024 * 10 },
+        (error, stdout, stderr) => {
+          if (error) {
+            // Fall back for brand new repos with no commits yet.
+            if (stderr && stderr.includes("ambiguous argument 'HEAD'")) {
+              exec(
+                `git ${gitFlags}`,
+                { cwd, maxBuffer: 1024 * 1024 * 10 },
+                (err2, stdout2, stderr2) => {
+                  if (err2) {
+                    this._latestDiff = "";
+                    this._view?.webview.postMessage({
+                      command: "diffResult",
+                      success: false,
+                      data: stderr2 || err2.message,
+                    });
+                    return;
+                  }
+
+                  const diffText = stdout2 || "(no changes)";
+                  this._latestDiff = diffText;
+                  this._view?.webview.postMessage({
+                    command: "diffResult",
+                    success: true,
+                    data: diffText,
+                  });
+                }
+              );
+              return;
+            }
+
+            this._latestDiff = "";
+            this._view?.webview.postMessage({
+              command: "diffResult",
+              success: false,
+              data: stderr || error.message,
+            });
+            return;
+          }
+
+          const diffText = stdout || "(no changes)";
+          this._latestDiff = diffText;
+          this._view?.webview.postMessage({
+            command: "diffResult",
+            success: true,
+            data: diffText,
+          });
+        }
+      );
     });
   }
 
@@ -342,8 +377,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     <div class="header">
       <h2><i class="codicon codicon-git-compare"></i> Workspace Diff</h2>
       <div class="btn-row">
-        <button class="btn btn-primary" id="btnLoad">
-          <i class="codicon codicon-refresh"></i> Load
+        <button class="btn btn-primary" id="btnReload">
+          <i class="codicon codicon-refresh"></i> Reload
         </button>
         <button class="btn btn-secondary" id="btnCopy" disabled>
           <i class="codicon codicon-copy"></i> Copy
@@ -360,7 +395,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     <div class="empty-state" id="emptyState">
       <i class="codicon codicon-file-code empty-icon"></i>
       <p>No diff loaded.</p>
-      <p style="margin-top: 4px; opacity: 0.8;">Click Load to run <code>git diff HEAD</code></p>
+      <p style="margin-top: 4px; opacity: 0.8;">Opening this view automatically reloads <code>git diff HEAD</code></p>
     </div>
     <div class="diff-output" id="diffOutput" style="display:none;"></div>
   </div>
@@ -380,7 +415,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   <script>
     const vscode = acquireVsCodeApi();
 
-    const btnLoad    = document.getElementById('btnLoad');
+    const btnReload  = document.getElementById('btnReload');
     const btnCopy    = document.getElementById('btnCopy');
     const diffOutput = document.getElementById('diffOutput');
     const emptyState = document.getElementById('emptyState');
@@ -398,7 +433,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       statusText.textContent = text;
     }
 
-    btnLoad.addEventListener('click', () => {
+    function beginLoad() {
       rawDiff = '';
       btnCopy.disabled = true;
       diffOutput.style.display = 'none';
@@ -406,12 +441,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       statsRow.style.display   = 'none';
 
       setStatus('codicon-sync loading', 'Analyzing workspace...');
+    }
+
+    btnReload.addEventListener('click', () => {
+      beginLoad();
       vscode.postMessage({ command: 'loadDiff' });
     });
 
     btnCopy.addEventListener('click', () => {
       if (!rawDiff) return;
-      vscode.postMessage({ command: 'copyDiff', data: rawDiff });
+      vscode.postMessage({ command: 'copyDiff' });
 
       const prevHtml = btnCopy.innerHTML;
       btnCopy.innerHTML = '<i class="codicon codicon-check"></i> Copied';
@@ -424,7 +463,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     window.addEventListener('message', (event) => {
       const msg = event.data;
-      if (msg.command === 'diffResult') {
+      if (msg.command === 'loadingDiff') {
+        beginLoad();
+      } else if (msg.command === 'diffResult') {
         if (msg.success) {
           rawDiff = msg.data;
           renderDiff(rawDiff);
@@ -441,6 +482,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
       }
     });
+
+    vscode.postMessage({ command: 'ready' });
 
     function createLine(gutterText, contentText, typeClass) {
       const el = document.createElement('div');
