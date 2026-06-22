@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { ChangedFile, DiffMode, ensureGitRepository, loadChangedFiles, loadDiffForPaths, toFriendlyError } from "./gitDiff";
+import { ChangedFile, DiffMode, ensureGitRepository, loadChangedFiles, loadDiffForPaths, loadCurrentFileDiff, toFriendlyError } from "./gitDiff";
 
 function isDiffMode(value: unknown): value is DiffMode {
     return value === "all" || value === "staged" || value === "unstaged";
@@ -113,11 +113,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
                 case "copyDiff": {
                     if (this._latestDiff) {
-                        await vscode.env.clipboard.writeText(this._latestDiff);
-                        vscode.window.showInformationMessage("Diff copied to clipboard!");
+                        await this._copyWithSizeWarning(this._latestDiff);
                     } else {
                         vscode.window.showWarningMessage("Load a diff before copying.");
                     }
+                    break;
+                }
+
+                case "copyCurrentFileDiff": {
+                    await this._handleCopyCurrentFile();
                     break;
                 }
 
@@ -133,6 +137,83 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 void this._loadDiff(this._selectedMode);
             }
         });
+    }
+
+    private async _copyWithSizeWarning(diffText: string): Promise<boolean> {
+        const sizeKb = Buffer.byteLength(diffText, "utf8") / 1024;
+        if (sizeKb > 500) {
+            const answer = await vscode.window.showWarningMessage(
+                "Diff is large. Copy anyway?",
+                { modal: true },
+                "Copy Anyway",
+                "Cancel"
+            );
+            if (answer !== "Copy Anyway") {
+                return false;
+            }
+        }
+        await vscode.env.clipboard.writeText(diffText);
+        vscode.window.showInformationMessage("Diff copied to clipboard!");
+        return true;
+    }
+
+    private _getCurrentFileUriForCopy(): vscode.Uri | undefined {
+        const activeEditor = vscode.window.activeTextEditor;
+        if (activeEditor?.document.uri.scheme === "file") {
+            return activeEditor.document.uri;
+        }
+
+        const activeTabGroup = vscode.window.tabGroups.activeTabGroup;
+        const activeTab = activeTabGroup?.activeTab;
+        const activeInput = activeTab?.input;
+        if (activeInput instanceof vscode.TabInputText && activeInput.uri.scheme === "file") {
+            return activeInput.uri;
+        }
+
+        const visibleFileEditor = vscode.window.visibleTextEditors.find(
+            (editor) => editor.document.uri.scheme === "file"
+        );
+        if (visibleFileEditor) {
+            return visibleFileEditor.document.uri;
+        }
+
+        return undefined;
+    }
+
+    private async _handleCopyCurrentFile() {
+        const fileUri = this._getCurrentFileUriForCopy();
+        if (!fileUri) {
+            vscode.window.showWarningMessage("No current file found.");
+            return;
+        }
+
+        const workspaceFolder = vscode.workspace.getWorkspaceFolder(fileUri);
+        if (!workspaceFolder) {
+            vscode.window.showWarningMessage("Active file is not inside a workspace folder.");
+            return;
+        }
+
+        const cwd = workspaceFolder.uri.fsPath;
+        const mode = this._selectedMode;
+
+        try {
+            await ensureGitRepository(cwd);
+        } catch (error) {
+            vscode.window.showWarningMessage("Active workspace folder is not a Git repository.");
+            return;
+        }
+
+        try {
+            const diffText = await loadCurrentFileDiff(mode, cwd, fileUri.fsPath);
+            if (!diffText) {
+                vscode.window.showWarningMessage(`No diff for current file in current mode.`);
+                return;
+            }
+
+            await this._copyWithSizeWarning(diffText);
+        } catch (error) {
+            vscode.window.showErrorMessage(toFriendlyError(error));
+        }
     }
 
     private async _loadDiff(mode: DiffMode = this._selectedMode) {
@@ -356,6 +437,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     .segmented-control .mode-btn:focus-visible {
       outline: 1px solid var(--vscode-focusBorder);
       outline-offset: -1px;
+    }
+
+    .action-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
 
     .action-row {
@@ -638,9 +725,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         <button class="mode-btn" data-mode="unstaged" aria-pressed="false">Unstaged</button>
       </div>
 
-      <div class="action-row">
-        <button class="btn btn-secondary" id="btnReload">Refresh</button>
+      <div class="action-stack">
         <button class="btn btn-primary" id="btnCopy" disabled>Copy Selected</button>
+        <div class="action-row action-row-secondary">
+          <button class="btn btn-secondary" id="btnReload">Refresh</button>
+          <button class="btn btn-secondary" id="btnCopyCurrent" title="Copy current file diff" aria-label="Copy current file diff">Current File</button>
+        </div>
       </div>
     </div>
   </div>
@@ -687,6 +777,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const btnReload = document.getElementById('btnReload');
     const btnCopy = document.getElementById('btnCopy');
+    const btnCopyCurrent = document.getElementById('btnCopyCurrent');
     const modeButtons = document.querySelectorAll('.mode-btn');
     const diffOutput = document.getElementById('diffOutput');
     const emptyState = document.getElementById('emptyState');
@@ -866,14 +957,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     btnCopy.addEventListener('click', () => {
       if (!rawDiff) return;
       vscode.postMessage({ command: 'copyDiff' });
+    });
 
-      const prevText = btnCopy.textContent;
-      btnCopy.textContent = 'Copied';
-      btnCopy.disabled = true;
-      setTimeout(() => {
-        btnCopy.textContent = prevText;
-        btnCopy.disabled = rawDiff.length === 0;
-      }, 1500);
+    btnCopyCurrent.addEventListener('click', () => {
+      vscode.postMessage({ command: 'copyCurrentFileDiff' });
     });
 
     window.addEventListener('message', (event) => {
