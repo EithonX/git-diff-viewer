@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { DiffMode, ensureGitRepository, loadDiffText, toFriendlyError } from "./gitDiff";
+import { ChangedFile, DiffMode, ensureGitRepository, loadChangedFiles, loadDiffForPaths, toFriendlyError } from "./gitDiff";
 
 function isDiffMode(value: unknown): value is DiffMode {
     return value === "all" || value === "staged" || value === "unstaged";
@@ -14,6 +14,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     private _isViewReady = false;
     private _selectedMode: DiffMode = "all";
     private _loadRequestId = 0;
+    private _latestChangedFiles: ChangedFile[] = [];
+    private _selectedPaths: Set<string> = new Set();
+    private _latestCwd?: string;
 
     /**
      * Initializes the SidebarProvider.
@@ -62,6 +65,52 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     break;
                 }
 
+                case "selectionChanged": {
+                    if (Array.isArray(message.selectedPaths) && this._latestCwd && this._latestChangedFiles.length > 0) {
+                        const requestedPathSet = new Set(
+                            message.selectedPaths.filter((path: unknown): path is string => typeof path === "string")
+                        );
+
+                        const selectedFiles = this._latestChangedFiles.filter((file) => requestedPathSet.has(file.path));
+                        this._selectedPaths = new Set(selectedFiles.map((file) => file.path));
+                        
+                        const requestId = ++this._loadRequestId;
+
+                        if (selectedFiles.length === 0) {
+                            this._latestDiff = "";
+                            this._view?.webview.postMessage({
+                                command: "selectionDiffResult",
+                                success: true,
+                                data: "",
+                                selectedPaths: []
+                            });
+                        } else {
+                            try {
+                                const diffText = await loadDiffForPaths(this._selectedMode, this._latestCwd, selectedFiles);
+                                if (this._isLatestRequest(requestId)) {
+                                    this._latestDiff = diffText;
+                                    this._view?.webview.postMessage({
+                                        command: "selectionDiffResult",
+                                        success: true,
+                                        data: diffText,
+                                        selectedPaths: Array.from(this._selectedPaths)
+                                    });
+                                }
+                            } catch (error) {
+                                if (this._isLatestRequest(requestId)) {
+                                    this._latestDiff = "";
+                                    this._view?.webview.postMessage({
+                                        command: "selectionDiffResult",
+                                        success: false,
+                                        data: toFriendlyError(error),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+
                 case "copyDiff": {
                     if (this._latestDiff) {
                         await vscode.env.clipboard.writeText(this._latestDiff);
@@ -94,6 +143,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         this._selectedMode = mode;
         const requestId = ++this._loadRequestId;
         this._latestDiff = "";
+        this._latestChangedFiles = [];
+        this._selectedPaths.clear();
+        this._latestCwd = undefined;
 
         this._postIfLatest(requestId, {
             command: "loadingDiff",
@@ -115,8 +167,17 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
         try {
             await ensureGitRepository(cwd);
+            this._latestCwd = cwd;
 
-            const diffText = await loadDiffText(mode, cwd);
+            const changedFiles = await loadChangedFiles(mode, cwd);
+            if (!this._isLatestRequest(requestId)) {
+                return;
+            }
+
+            this._latestChangedFiles = changedFiles;
+            this._selectedPaths = new Set(changedFiles.map((f) => f.path));
+
+            const diffText = await loadDiffForPaths(mode, cwd, changedFiles);
             if (!this._isLatestRequest(requestId)) {
                 return;
             }
@@ -126,6 +187,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 command: "diffResult",
                 success: true,
                 mode,
+                files: changedFiles,
+                selectedPaths: Array.from(this._selectedPaths),
                 data: diffText,
             });
         } catch (error) {
@@ -339,6 +402,105 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       outline-offset: -1px;
     }
 
+    .files-panel {
+      background: var(--vscode-sideBar-background);
+      border-bottom: 1px solid var(--vscode-panel-border);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+      max-height: 40vh;
+    }
+
+    .files-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 14px;
+      background: var(--vscode-sideBarSectionHeader-background, rgba(0,0,0,0.1));
+      border-bottom: 1px solid var(--vscode-panel-border);
+    }
+
+    .files-title {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--vscode-sideBarSectionHeader-foreground);
+      text-transform: uppercase;
+    }
+
+    .files-controls {
+      display: flex;
+      gap: 6px;
+    }
+
+    .file-control-btn {
+      background: transparent;
+      border: none;
+      color: var(--vscode-textLink-foreground);
+      font-size: 11px;
+      padding: 0;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    
+    .file-control-btn:hover {
+      text-decoration: underline;
+    }
+
+    .file-control-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      text-decoration: none;
+    }
+
+    .file-control-btn:focus-visible {
+      outline: 1px solid var(--vscode-focusBorder);
+      outline-offset: -1px;
+    }
+
+    .file-list {
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+
+    .file-row {
+      display: flex;
+      align-items: center;
+      padding: 2px 14px;
+      gap: 8px;
+    }
+
+    .file-checkbox {
+      margin: 0;
+      cursor: pointer;
+    }
+
+    .file-status {
+      font-size: 11px;
+      font-family: var(--vscode-editor-font-family, monospace);
+      width: 14px;
+      text-align: center;
+      flex-shrink: 0;
+      font-weight: 600;
+    }
+
+    .file-status.status-M { color: var(--vscode-gitDecoration-modifiedResourceForeground); }
+    .file-status.status-A { color: var(--vscode-gitDecoration-addedResourceForeground); }
+    .file-status.status-D { color: var(--vscode-gitDecoration-deletedResourceForeground); }
+    .file-status.status-R { color: var(--vscode-gitDecoration-renamedResourceForeground); }
+    .file-status.status-C { color: var(--vscode-gitDecoration-renamedResourceForeground); }
+    .file-status.status-U { color: var(--vscode-gitDecoration-untrackedResourceForeground); }
+    .file-status.status-Q { color: var(--vscode-gitDecoration-untrackedResourceForeground); }
+
+    .file-path {
+      font-size: 12px;
+      color: var(--vscode-foreground);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      cursor: pointer;
+      user-select: none;
+    }
+
     .diff-container {
       flex: 1;
       overflow-y: auto;
@@ -470,17 +632,28 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         </div>
       </div>
       
-      <div class="segmented-control" role="toolbar" aria-label="Diff mode selector">
+      <div class="segmented-control" role="group" aria-label="Diff mode selector">
         <button class="mode-btn" data-mode="all" aria-pressed="true">All</button>
         <button class="mode-btn" data-mode="staged" aria-pressed="false">Staged</button>
         <button class="mode-btn" data-mode="unstaged" aria-pressed="false">Unstaged</button>
       </div>
 
       <div class="action-row">
-        <button class="btn btn-primary" id="btnCopy" disabled>Copy Diff</button>
         <button class="btn btn-secondary" id="btnReload">Refresh</button>
+        <button class="btn btn-primary" id="btnCopy" disabled>Copy Selected</button>
       </div>
     </div>
+  </div>
+
+  <div class="files-panel" id="filesPanel" style="display:none;">
+    <div class="files-header">
+      <span class="files-title">Changed files</span>
+      <div class="files-controls">
+        <button class="file-control-btn" id="btnSelectAll">All</button>
+        <button class="file-control-btn" id="btnSelectNone">None</button>
+      </div>
+    </div>
+    <div class="file-list" id="fileList"></div>
   </div>
 
   <div class="diff-container" id="diffContainer">
@@ -525,6 +698,11 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const statFiles = document.getElementById('statFiles');
     const statAdd = document.getElementById('statAdd');
     const statDel = document.getElementById('statDel');
+    
+    const filesPanel = document.getElementById('filesPanel');
+    const fileList = document.getElementById('fileList');
+    const btnSelectAll = document.getElementById('btnSelectAll');
+    const btnSelectNone = document.getElementById('btnSelectNone');
 
     let rawDiff = '';
     let currentMode = 'all';
@@ -561,6 +739,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       diffOutput.style.display = 'none';
       emptyState.style.display = 'none';
       statsRow.style.display = 'none';
+      filesPanel.style.display = 'none';
       setStatus('Loading ' + getModeLabel(mode) + '...', 'loading');
     }
 
@@ -572,6 +751,102 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       diffOutput.style.display = 'none';
       statsRow.style.display = 'none';
     }
+
+    function renderFileList(files, selectedPaths) {
+      fileList.innerHTML = '';
+      const selectedSet = new Set(selectedPaths || []);
+
+      if (!files || files.length === 0) {
+        btnSelectAll.disabled = true;
+        btnSelectNone.disabled = true;
+        return;
+      }
+
+      btnSelectAll.disabled = false;
+      btnSelectNone.disabled = false;
+
+      files.forEach(f => {
+        const row = document.createElement('label');
+        row.className = 'file-row';
+
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.className = 'file-checkbox';
+        checkbox.dataset.path = f.path;
+        checkbox.checked = selectedSet.has(f.path);
+        checkbox.addEventListener('change', onSelectionChanged);
+
+        const status = document.createElement('span');
+        const sClass = f.status === '?' ? 'Q' : f.status;
+        status.className = 'file-status status-' + sClass;
+        status.textContent = f.status;
+
+        const pathEl = document.createElement('span');
+        pathEl.className = 'file-path';
+        pathEl.textContent = f.path;
+        pathEl.title = f.path;
+
+        row.appendChild(checkbox);
+        row.appendChild(status);
+        row.appendChild(pathEl);
+        fileList.appendChild(row);
+      });
+      
+      filesPanel.style.display = 'flex';
+    }
+
+    function onSelectionChanged() {
+      const checkboxes = fileList.querySelectorAll('.file-checkbox');
+      const selectedPaths = [];
+      let anySelected = false;
+      
+      checkboxes.forEach(cb => {
+        if (cb.checked) {
+          selectedPaths.push(cb.dataset.path);
+          anySelected = true;
+        }
+      });
+
+      if (!anySelected) {
+        showEmptyState('No files selected.');
+        setStatus('No files selected.', 'info');
+        btnCopy.disabled = true;
+        rawDiff = '';
+        statsRow.style.display = 'none';
+      } else {
+        setStatus('Loading selection...', 'loading');
+      }
+
+      vscode.postMessage({ command: 'selectionChanged', selectedPaths });
+    }
+
+    btnSelectAll.addEventListener('click', () => {
+      const checkboxes = fileList.querySelectorAll('.file-checkbox');
+      let changed = false;
+      checkboxes.forEach(cb => {
+        if (!cb.checked) {
+          cb.checked = true;
+          changed = true;
+        }
+      });
+      if (changed) {
+        onSelectionChanged();
+      }
+    });
+
+    btnSelectNone.addEventListener('click', () => {
+      const checkboxes = fileList.querySelectorAll('.file-checkbox');
+      let changed = false;
+      checkboxes.forEach(cb => {
+        if (cb.checked) {
+          cb.checked = false;
+          changed = true;
+        }
+      });
+      if (changed) {
+        onSelectionChanged();
+      }
+    });
 
     btnReload.addEventListener('click', () => {
       beginLoad(currentMode);
@@ -610,9 +885,38 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         updateActiveModeUI(mode);
 
         if (msg.success) {
+          if (msg.files && msg.files.length > 0) {
+            renderFileList(msg.files, msg.selectedPaths);
+          } else {
+            filesPanel.style.display = 'none';
+          }
+
           rawDiff = msg.data;
           renderDiff(rawDiff, mode);
           btnCopy.disabled = rawDiff.length === 0;
+        } else {
+          rawDiff = '';
+          btnCopy.disabled = true;
+          filesPanel.style.display = 'none';
+          setStatus('Error loading diff', 'error');
+          showEmptyState(msg.data, '');
+        }
+      } else if (msg.command === 'selectionDiffResult') {
+        if (msg.success) {
+          rawDiff = msg.data;
+          if (rawDiff.length > 0) {
+            renderDiff(rawDiff, currentMode);
+            const checkboxes = fileList.querySelectorAll('.file-checkbox');
+            let selectedCount = 0;
+            checkboxes.forEach(cb => { if (cb.checked) selectedCount++; });
+            setStatus('Loaded ' + selectedCount + ' selected files.', 'success');
+            btnCopy.disabled = false;
+          } else {
+            btnCopy.disabled = true;
+            rawDiff = '';
+            showEmptyState('No files selected.');
+            setStatus('No files selected.', 'info');
+          }
         } else {
           rawDiff = '';
           btnCopy.disabled = true;
