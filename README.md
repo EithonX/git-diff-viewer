@@ -1,13 +1,16 @@
 # Git Diff Viewer
 
-A Visual Studio Code extension that lets you inspect Git diffs directly from the sidebar and copy the currently selected diff output.
+A Visual Studio Code extension that lets you inspect Git diffs directly from the sidebar and copy the selected raw diff output.
 
 ## Features
 
 - **Diff Modes**: Switch between **All changes**, **Staged only**, and **Unstaged only** from the sidebar header.
-- **Sidebar View**: View your current workspace diff in the VS Code sidebar without mutating the Git index.
-- **Syntax Highlighting**: Basic syntax highlighting for diff outputs, separating additions, deletions, and hunks.
-- **Copy Button**: Copy the raw diff output for the currently selected mode.
+- **Changed Files Checklist**: Choose exactly which files are included in your diff using the interactive file checklist.
+- **Copy Selected**: Copy the raw Git diff for exactly the files you checked.
+- **Copy Current File**: Instantly copy the raw Git diff of your currently active file editor.
+- **Large Diff Warning**: Protects your clipboard by warning you before copying diffs larger than 500 KB.
+- **Raw Git Diff Output**: The copied output is pure raw Git diff only.
+- **Sidebar View**: View your current workspace diff with syntax highlighting in the VS Code sidebar without mutating the Git index.
 - **Stats**: View a quick summary of files changed, additions, and deletions.
 
 ## Usage
@@ -18,8 +21,9 @@ A Visual Studio Code extension that lets you inspect Git diffs directly from the
    - **All changes**: staged + unstaged tracked changes, plus untracked files.
    - **Staged only**: only staged changes.
    - **Unstaged only**: only unstaged tracked changes.
-4. Click **Reload** or switch modes to load the selected diff immediately.
-5. Click **Copy** to copy the raw diff for the current mode.
+4. Use the **Changed files** checklist to select or unselect files.
+5. Click **Copy Selected** to copy the raw diff for the checked files.
+6. Alternatively, click **Current File** to copy the diff of the file currently active in your editor.
 
 ## Requirements
 
