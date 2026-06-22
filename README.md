@@ -1,20 +1,25 @@
 # Git Diff Viewer
 
-A Visual Studio Code extension that allows you to load and view the `git diff` output directly from the sidebar. You can also easily copy the diff to your clipboard.
+A Visual Studio Code extension that lets you inspect Git diffs directly from the sidebar and copy the currently selected diff output.
 
 ## Features
 
-- **Sidebar View**: View your current workspace's `git diff HEAD` right in the VS Code sidebar.
+- **Diff Modes**: Switch between **All changes**, **Staged only**, and **Unstaged only** from the sidebar header.
+- **Sidebar View**: View your current workspace diff in the VS Code sidebar without mutating the Git index.
 - **Syntax Highlighting**: Basic syntax highlighting for diff outputs, separating additions, deletions, and hunks.
-- **Copy Button**: A quick access button to copy the raw diff output to your clipboard.
+- **Copy Button**: Copy the raw diff output for the currently selected mode.
 - **Stats**: View a quick summary of files changed, additions, and deletions.
 
 ## Usage
 
 1. Open a workspace with a Git repository.
 2. Click on the Git Diff Viewer icon in the Activity Bar to open the sidebar.
-3. Click the **Load** button to analyze your workspace. The output of `git diff HEAD` (or `git diff` if no HEAD is found) will be displayed.
-4. Click the **Copy** button to copy the raw diff output.
+3. Choose one of the available diff modes:
+   - **All changes**: staged + unstaged tracked changes, plus untracked files.
+   - **Staged only**: only staged changes.
+   - **Unstaged only**: only unstaged tracked changes.
+4. Click **Reload** or switch modes to load the selected diff immediately.
+5. Click **Copy** to copy the raw diff for the current mode.
 
 ## Requirements
 

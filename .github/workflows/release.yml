@@ -21,10 +21,12 @@ jobs:
           node-version: '20' # Matches your package.json devDependencies
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
+
+      - name: Compile extension
+        run: npm run compile
 
       - name: Package Extension
-        # vsce automatically runs 'npm run compile' because of your prepublish script
         run: npx vsce package --allow-missing-repository
 
       - name: Find VSIX file
