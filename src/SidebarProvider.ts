@@ -1,38 +1,8 @@
 import * as vscode from "vscode";
-import { execFile } from "child_process";
-
-type DiffMode = "all" | "staged" | "unstaged";
-
-type GitCommandOptions = {
-    allowExitCodes?: number[];
-};
-
-type GitCommandResult = {
-    stdout: string;
-    stderr: string;
-    exitCode: number;
-};
-
-const MAX_GIT_BUFFER = 50 * 1024 * 1024;
-class GitCommandError extends Error {
-    constructor(
-        readonly args: string[],
-        readonly stdout: string,
-        readonly stderr: string,
-        readonly exitCode: number,
-        message: string
-    ) {
-        super(message);
-        this.name = "GitCommandError";
-    }
-}
+import { DiffMode, ensureGitRepository, loadDiffText, toFriendlyError } from "./gitDiff";
 
 function isDiffMode(value: unknown): value is DiffMode {
     return value === "all" || value === "staged" || value === "unstaged";
-}
-
-function isGitCommandError(error: unknown): error is GitCommandError {
-    return error instanceof GitCommandError;
 }
 
 /**
@@ -144,9 +114,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         const cwd = workspaceFolder.uri.fsPath;
 
         try {
-            await this._ensureGitRepository(cwd);
+            await ensureGitRepository(cwd);
 
-            const diffText = await this._loadDiffText(mode, cwd);
+            const diffText = await loadDiffText(mode, cwd);
             if (!this._isLatestRequest(requestId)) {
                 return;
             }
@@ -168,7 +138,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                 command: "diffResult",
                 success: false,
                 mode,
-                data: this._toFriendlyError(error),
+                data: toFriendlyError(error),
             });
         }
     }
@@ -190,203 +160,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return workspaceFolders[0];
     }
 
-    private async _ensureGitRepository(cwd: string): Promise<void> {
-        await this._runGit(["rev-parse", "--is-inside-work-tree"], cwd);
-    }
-
-    private async _loadDiffText(mode: DiffMode, cwd: string): Promise<string> {
-        switch (mode) {
-            case "staged":
-                return this._loadStagedDiff(cwd);
-            case "unstaged":
-                return this._loadUnstagedDiff(cwd);
-            case "all":
-            default:
-                return this._loadAllDiff(cwd);
-        }
-    }
-
-    private async _loadStagedDiff(cwd: string): Promise<string> {
-        const result = await this._runGit(
-            ["diff", "--cached", "--no-ext-diff", "--no-color"],
-            cwd
-        );
-
-        return result.stdout;
-    }
-
-    private async _loadUnstagedDiff(cwd: string): Promise<string> {
-        const result = await this._runGit(
-            ["diff", "--no-ext-diff", "--no-color"],
-            cwd
-        );
-
-        return result.stdout;
-    }
-
-    private async _loadAllDiff(cwd: string): Promise<string> {
-        let trackedDiff = "";
-
-        try {
-            const result = await this._runGit(
-                ["diff", "--no-ext-diff", "--no-color", "HEAD"],
-                cwd
-            );
-            trackedDiff = result.stdout;
-        } catch (error) {
-            if (!this._isMissingHeadError(error)) {
-                throw error;
-            }
-
-            trackedDiff = this._joinDiffChunks([
-                await this._loadStagedDiff(cwd),
-                await this._loadUnstagedDiff(cwd),
-            ]);
-        }
-
-        const untrackedDiff = await this._loadUntrackedDiff(cwd);
-        return this._joinDiffChunks([trackedDiff, untrackedDiff]);
-    }
-
-    private async _loadUntrackedDiff(cwd: string): Promise<string> {
-        const { stdout } = await this._runGit(
-            ["ls-files", "--others", "--exclude-standard", "-z"],
-            cwd
-        );
-
-        const files = stdout.split("\0").filter((file) => file.length > 0);
-        if (files.length === 0) {
-            return "";
-        }
-
-        const diffChunks: string[] = [];
-
-        for (const file of files) {
-            try {
-                const diffResult = await this._runGit(
-                    ["diff", "--no-index", "--no-ext-diff", "--no-color", "--", "/dev/null", file],
-                    cwd,
-                    { allowExitCodes: [1] }
-                );
-                diffChunks.push(diffResult.stdout);
-            } catch (error) {
-                if (this._isMissingUntrackedFileError(error)) {
-                    continue;
-                }
-
-                throw error;
-            }
-        }
-
-        return this._joinDiffChunks(diffChunks);
-    }
-
-    private _joinDiffChunks(chunks: string[]): string {
-        const nonEmptyChunks = chunks.filter((chunk) => chunk.length > 0);
-        if (nonEmptyChunks.length === 0) {
-            return "";
-        }
-
-        let combined = nonEmptyChunks[0];
-        for (const chunk of nonEmptyChunks.slice(1)) {
-            if (!combined.endsWith("\n") && !chunk.startsWith("\n")) {
-                combined += "\n";
-            }
-            combined += chunk;
-        }
-
-        return combined;
-    }
-
-    private _runGit(
-        args: string[],
-        cwd: string,
-        options: GitCommandOptions = {}
-    ): Promise<GitCommandResult> {
-        const allowedExitCodes = new Set(options.allowExitCodes ?? []);
-
-        return new Promise((resolve, reject) => {
-            execFile(
-                "git",
-                args,
-                {
-                    cwd,
-                    maxBuffer: MAX_GIT_BUFFER,
-                    windowsHide: true,
-                },
-                (error, stdout, stderr) => {
-                    const exitCode =
-                        typeof error?.code === "number"
-                            ? error.code
-                            : error
-                                ? 1
-                                : 0;
-
-                    if (error && !allowedExitCodes.has(exitCode)) {
-                        reject(
-                            new GitCommandError(
-                                args,
-                                stdout,
-                                stderr,
-                                exitCode,
-                                stderr.trim() || error.message
-                            )
-                        );
-                        return;
-                    }
-
-                    resolve({
-                        stdout,
-                        stderr,
-                        exitCode,
-                    });
-                }
-            );
-        });
-    }
-
-    private _isMissingHeadError(error: unknown): boolean {
-        if (!isGitCommandError(error)) {
-            return false;
-        }
-
-        const message = `${error.stderr}\n${error.message}`.toLowerCase();
-        return message.includes("ambiguous argument 'head'")
-            || message.includes("bad revision 'head'")
-            || message.includes("unknown revision or path not in the working tree");
-    }
-
-    private _isMissingUntrackedFileError(error: unknown): boolean {
-        if (!isGitCommandError(error)) {
-            return false;
-        }
-
-        const message = `${error.stderr}\n${error.message}`.toLowerCase();
-        return message.includes("could not access")
-            || message.includes("no such file or directory");
-    }
-
-    private _toFriendlyError(error: unknown): string {
-        if (isGitCommandError(error)) {
-            const message = `${error.stderr}\n${error.message}`.toLowerCase();
-
-            if (message.includes("not a git repository")) {
-                return "Selected folder is not a Git repository.";
-            }
-
-            if (message.includes("spawn git") && message.includes("enoent")) {
-                return "Git executable not found in PATH.";
-            }
-
-            return error.stderr.trim() || error.message;
-        }
-
-        if (error instanceof Error) {
-            return error.message;
-        }
-
-        return "Unknown error while loading diff.";
-    }
 
     private _isLatestRequest(requestId: number): boolean {
         return requestId === this._loadRequestId;
