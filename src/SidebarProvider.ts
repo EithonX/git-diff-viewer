@@ -160,7 +160,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         return workspaceFolders[0];
     }
 
-
     private _isLatestRequest(requestId: number): boolean {
         return requestId === this._loadRequestId;
     }
@@ -181,7 +180,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Git Diff Viewer</title>
-  <link href="https://cdn.jsdelivr.net/npm/@vscode/codicons/dist/codicon.css" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; }
 
@@ -207,45 +205,99 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       padding: 12px 14px;
     }
 
-    .header h2 {
+    .title-row {
+      margin-bottom: 12px;
+    }
+
+    .title-row h1 {
       font-size: 11px;
       font-weight: 600;
       text-transform: uppercase;
       color: var(--vscode-sideBarTitle-foreground);
-      margin: 0 0 12px 0;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      margin: 0 0 4px 0;
       letter-spacing: 0.5px;
     }
 
-    .toolbar {
+    .status-container {
       display: flex;
-      gap: 8px;
       align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
     }
 
-    .mode-select {
-      min-width: 116px;
-      height: 30px;
-      padding: 0 8px;
-      border: 1px solid var(--vscode-dropdown-border, transparent);
-      border-radius: 2px;
-      background: var(--vscode-dropdown-background);
-      color: var(--vscode-dropdown-foreground);
-      font-family: inherit;
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: var(--vscode-descriptionForeground);
+      display: inline-block;
+      transition: background-color 0.2s;
+    }
+
+    .status-dot.loading {
+      background-color: var(--vscode-textLink-foreground);
+      animation: pulse 1.5s infinite ease-in-out;
+    }
+
+    .status-dot.success {
+      background-color: var(--vscode-testing-iconPassed, var(--vscode-descriptionForeground));
+    }
+
+    .status-dot.error {
+      background-color: var(--vscode-testing-iconFailed, var(--vscode-descriptionForeground));
+    }
+
+    @keyframes pulse {
+      0% { opacity: 0.4; }
+      50% { opacity: 1; }
+      100% { opacity: 0.4; }
+    }
+
+    .segmented-control {
+      display: flex;
+      background: var(--vscode-sideBar-background);
+      border: 1px solid var(--vscode-panel-border);
+      border-radius: 4px;
+      padding: 2px;
+      gap: 2px;
+      margin-bottom: 12px;
+    }
+
+    .segmented-control .mode-btn {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: var(--vscode-descriptionForeground);
+      padding: 6px 4px;
       font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      border-radius: 3px;
+      text-align: center;
+      transition: background 0.1s, color 0.1s;
       outline: none;
     }
 
-    .mode-select:focus {
-      border-color: var(--vscode-focusBorder);
+    .segmented-control .mode-btn:hover {
+      background: var(--vscode-button-secondaryHoverBackground, rgba(255, 255, 255, 0.05));
+      color: var(--vscode-foreground);
     }
 
-    .btn-row {
+    .segmented-control .mode-btn[aria-pressed="true"] {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      font-weight: 600;
+    }
+
+    .segmented-control .mode-btn:focus-visible {
+      outline: 1px solid var(--vscode-focusBorder);
+      outline-offset: -1px;
+    }
+
+    .action-row {
       display: flex;
       gap: 8px;
-      flex: 1;
     }
 
     .btn {
@@ -256,7 +308,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       gap: 6px;
       padding: 6px 12px;
       border: 1px solid transparent;
-      border-radius: 2px;
+      border-radius: 4px;
       font-family: inherit;
       font-size: 12px;
       cursor: pointer;
@@ -280,23 +332,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     .btn-secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
 
-    .btn:disabled { opacity: 0.5; cursor: not-allowed; pointer-events: none; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
 
-    .status-bar {
-      padding: 6px 14px;
-      font-size: 11px;
-      color: var(--vscode-descriptionForeground);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      background: var(--vscode-editor-background);
-      border-bottom: 1px solid var(--vscode-panel-border);
+    .btn:focus-visible {
+      outline: 1px solid var(--vscode-focusBorder);
+      outline-offset: -1px;
     }
-
-    .codicon-sync.loading { animation: spin 1s linear infinite; color: var(--vscode-textLink-foreground); }
-    @keyframes spin { 100% { transform: rotate(360deg); } }
-    .status-success { color: var(--vscode-testing-iconPassed); }
-    .status-error { color: var(--vscode-testing-iconFailed); }
 
     .diff-container {
       flex: 1;
@@ -307,9 +348,9 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     .diff-output {
-      font-family: var(--vscode-editor-font-family, 'Consolas', 'Courier New', monospace);
-      font-size: var(--vscode-editor-font-size, 13px);
-      line-height: 1.4;
+      font-family: var(--vscode-editor-font-family, Menlo, Monaco, Consolas, monospace);
+      font-size: var(--vscode-editor-font-size, 12px);
+      line-height: 1.5;
       min-width: max-content;
       padding-bottom: 20px;
     }
@@ -320,11 +361,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     .line-gutter {
-      width: 32px;
-      min-width: 32px;
-      padding-right: 8px;
+      width: 24px;
+      min-width: 24px;
+      padding-right: 6px;
       text-align: right;
-      color: var(--vscode-lineNumbers-foreground, #858585);
+      color: var(--vscode-editorLineNumber-foreground, var(--vscode-lineNumbers-foreground));
+      font-size: 11px;
       user-select: none;
       display: flex;
       justify-content: flex-end;
@@ -339,7 +381,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     .line-add {
-      background-color: var(--vscode-diffEditor-insertedTextBackground, rgba(46, 160, 67, 0.15));
+      background-color: var(--vscode-diffEditor-insertedTextBackground, rgba(46, 160, 67, 0.1));
     }
 
     .line-add .line-content {
@@ -347,7 +389,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     .line-remove {
-      background-color: var(--vscode-diffEditor-removedTextBackground, rgba(248, 81, 73, 0.15));
+      background-color: var(--vscode-diffEditor-removedTextBackground, rgba(248, 81, 73, 0.1));
     }
 
     .line-remove .line-content {
@@ -355,21 +397,22 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
 
     .line-hunk {
-      background-color: var(--vscode-diffEditor-diagonalFill, rgba(0, 122, 204, 0.2));
-      color: var(--vscode-textLink-foreground);
-      margin-top: 10px;
-      padding-top: 4px;
-      padding-bottom: 4px;
+      background-color: var(--vscode-diffEditor-diagonalFill, rgba(0, 122, 204, 0.05));
+      color: var(--vscode-textLink-activeForeground, var(--vscode-textLink-foreground));
+      font-size: 11px;
+      border-top: 1px solid var(--vscode-panel-border);
+      border-bottom: 1px solid var(--vscode-panel-border);
+      padding: 2px 0;
+      opacity: 0.85;
     }
 
     .line-file-header {
-      font-weight: bold;
-      color: var(--vscode-textPreformat-foreground);
-      background: var(--vscode-editorGroupHeader-tabsBackground);
-      margin-top: 16px;
-      padding: 6px 0;
+      font-weight: 600;
+      color: var(--vscode-textLink-foreground);
+      background: var(--vscode-editorGroupHeader-tabsBackground, rgba(0, 0, 0, 0.1));
       border-top: 1px solid var(--vscode-panel-border);
       border-bottom: 1px solid var(--vscode-panel-border);
+      padding: 4px 0;
     }
 
     .line-normal { color: var(--vscode-editor-foreground); }
@@ -385,30 +428,27 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       color: var(--vscode-descriptionForeground);
     }
 
-    .empty-icon { font-size: 48px !important; margin-bottom: 16px; opacity: 0.6; }
-    .empty-state p { font-size: 13px; line-height: 1.5; margin: 0; }
-    .empty-state code {
-      background: var(--vscode-textCodeBlock-background);
-      padding: 2px 4px;
-      border-radius: 3px;
-    }
+    .empty-state p { font-size: 12px; line-height: 1.5; margin: 0; }
 
     .stats-row {
       display: flex;
-      gap: 16px;
+      gap: 8px;
       padding: 8px 14px;
       background: var(--vscode-sideBar-background);
       border-top: 1px solid var(--vscode-panel-border);
       font-size: 11px;
       color: var(--vscode-descriptionForeground);
       flex-shrink: 0;
+      align-items: center;
     }
 
-    .stat { display: flex; align-items: center; gap: 4px; }
-    .stat i { font-size: 12px; }
-    .stat-add { color: var(--vscode-gitDecoration-addedResourceForeground); }
-    .stat-del { color: var(--vscode-gitDecoration-deletedResourceForeground); }
-    .stat-file { color: var(--vscode-gitDecoration-modifiedResourceForeground); }
+    .stats-row .stat-add {
+      color: var(--vscode-gitDecoration-addedResourceForeground, var(--vscode-descriptionForeground));
+    }
+
+    .stats-row .stat-del {
+      color: var(--vscode-gitDecoration-deletedResourceForeground, var(--vscode-descriptionForeground));
+    }
 
     ::-webkit-scrollbar { width: 10px; height: 10px; }
     ::-webkit-scrollbar-corner { background: transparent; }
@@ -422,48 +462,41 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
   <div class="header-container">
     <div class="header">
-      <h2><i class="codicon codicon-git-compare"></i> Workspace Diff</h2>
-      <div class="toolbar">
-        <select class="mode-select" id="modeSelect" aria-label="Diff mode">
-          <option value="all">All changes</option>
-          <option value="staged">Staged only</option>
-          <option value="unstaged">Unstaged only</option>
-        </select>
-        <div class="btn-row">
-          <button class="btn btn-primary" id="btnReload">
-            <i class="codicon codicon-refresh"></i> Reload
-          </button>
-          <button class="btn btn-secondary" id="btnCopy" disabled>
-            <i class="codicon codicon-copy"></i> Copy
-          </button>
+      <div class="title-row">
+        <h1>Git Diff</h1>
+        <div class="status-container" aria-live="polite">
+          <span class="status-dot" id="statusDot"></span>
+          <span class="status-text" id="statusText">Raw workspace diff ready for copy</span>
         </div>
       </div>
-    </div>
-    <div class="status-bar" id="statusBar">
-      <i class="codicon codicon-info" id="statusIcon"></i>
-      <span id="statusText">Ready to load all changes.</span>
+      
+      <div class="segmented-control" role="toolbar" aria-label="Diff mode selector">
+        <button class="mode-btn" data-mode="all" aria-pressed="true">All</button>
+        <button class="mode-btn" data-mode="staged" aria-pressed="false">Staged</button>
+        <button class="mode-btn" data-mode="unstaged" aria-pressed="false">Unstaged</button>
+      </div>
+
+      <div class="action-row">
+        <button class="btn btn-primary" id="btnCopy" disabled>Copy Diff</button>
+        <button class="btn btn-secondary" id="btnReload">Refresh</button>
+      </div>
     </div>
   </div>
 
   <div class="diff-container" id="diffContainer">
     <div class="empty-state" id="emptyState">
-      <i class="codicon codicon-file-code empty-icon"></i>
       <p id="emptyStatePrimary">No diff loaded.</p>
-      <p id="emptyStateSecondary" style="margin-top: 4px; opacity: 0.8;">Choose mode, then reload to inspect Git changes.</p>
+      <p id="emptyStateSecondary" style="margin-top: 4px; opacity: 0.8;">Choose mode, then refresh to inspect Git changes.</p>
     </div>
     <div class="diff-output" id="diffOutput" style="display:none;"></div>
   </div>
 
   <div class="stats-row" id="statsRow" style="display:none;">
-    <div class="stat stat-file">
-      <i class="codicon codicon-files"></i> <span id="statFiles">0</span>
-    </div>
-    <div class="stat stat-add">
-      <i class="codicon codicon-add"></i> <span id="statAdd">0</span>
-    </div>
-    <div class="stat stat-del">
-      <i class="codicon codicon-remove"></i> <span id="statDel">0</span>
-    </div>
+    <span>Files <span id="statFiles">0</span></span>
+    <span>·</span>
+    <span class="stat-add">+<span id="statAdd">0</span></span>
+    <span>·</span>
+    <span class="stat-del">-<span id="statDel">0</span></span>
   </div>
 
   <script>
@@ -481,12 +514,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     const btnReload = document.getElementById('btnReload');
     const btnCopy = document.getElementById('btnCopy');
-    const modeSelect = document.getElementById('modeSelect');
+    const modeButtons = document.querySelectorAll('.mode-btn');
     const diffOutput = document.getElementById('diffOutput');
     const emptyState = document.getElementById('emptyState');
     const emptyStatePrimary = document.getElementById('emptyStatePrimary');
     const emptyStateSecondary = document.getElementById('emptyStateSecondary');
-    const statusIcon = document.getElementById('statusIcon');
+    const statusDot = document.getElementById('statusDot');
     const statusText = document.getElementById('statusText');
     const statsRow = document.getElementById('statsRow');
     const statFiles = document.getElementById('statFiles');
@@ -500,24 +533,38 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       return MODE_LABELS[mode] || MODE_LABELS.all;
     }
 
-    function setStatus(iconClass, text, colorClass = '') {
-      statusIcon.className = \`codicon \${iconClass} \${colorClass}\`;
+    function setStatus(text, statusType = 'info') {
       statusText.textContent = text;
+      statusDot.className = 'status-dot';
+      if (statusType === 'loading') {
+        statusDot.classList.add('loading');
+      } else if (statusType === 'success') {
+        statusDot.classList.add('success');
+      } else if (statusType === 'error') {
+        statusDot.classList.add('error');
+      }
+    }
+
+    function updateActiveModeUI(activeMode) {
+      currentMode = activeMode;
+      modeButtons.forEach(btn => {
+        const mode = btn.getAttribute('data-mode');
+        const isPressed = mode === activeMode;
+        btn.setAttribute('aria-pressed', isPressed ? 'true' : 'false');
+      });
     }
 
     function beginLoad(mode = currentMode) {
-      currentMode = mode;
-      modeSelect.value = mode;
+      updateActiveModeUI(mode);
       rawDiff = '';
       btnCopy.disabled = true;
       diffOutput.style.display = 'none';
       emptyState.style.display = 'none';
       statsRow.style.display = 'none';
-      setStatus('codicon-sync loading', \`Loading \${getModeLabel(mode)}...\`);
+      setStatus('Loading ' + getModeLabel(mode) + '...', 'loading');
     }
 
     function showEmptyState(primaryText, secondaryText = '') {
-      emptyState.querySelector('.empty-icon').className = 'codicon codicon-pass-filled empty-icon status-success';
       emptyStatePrimary.textContent = primaryText;
       emptyStateSecondary.textContent = secondaryText;
       emptyStateSecondary.style.display = secondaryText ? 'block' : 'none';
@@ -531,21 +578,25 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       vscode.postMessage({ command: 'loadDiff', mode: currentMode });
     });
 
-    modeSelect.addEventListener('change', () => {
-      currentMode = modeSelect.value;
-      beginLoad(currentMode);
-      vscode.postMessage({ command: 'loadDiff', mode: currentMode });
+    modeButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const mode = btn.getAttribute('data-mode');
+        if (mode) {
+          beginLoad(mode);
+          vscode.postMessage({ command: 'loadDiff', mode: mode });
+        }
+      });
     });
 
     btnCopy.addEventListener('click', () => {
       if (!rawDiff) return;
       vscode.postMessage({ command: 'copyDiff' });
 
-      const prevHtml = btnCopy.innerHTML;
-      btnCopy.innerHTML = '<i class="codicon codicon-check"></i> Copied';
+      const prevText = btnCopy.textContent;
+      btnCopy.textContent = 'Copied';
       btnCopy.disabled = true;
       setTimeout(() => {
-        btnCopy.innerHTML = prevHtml;
+        btnCopy.textContent = prevText;
         btnCopy.disabled = rawDiff.length === 0;
       }, 1500);
     });
@@ -555,24 +606,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (msg.command === 'loadingDiff') {
         beginLoad(msg.mode || currentMode);
       } else if (msg.command === 'diffResult') {
-        currentMode = msg.mode || currentMode;
-        modeSelect.value = currentMode;
+        const mode = msg.mode || currentMode;
+        updateActiveModeUI(mode);
 
         if (msg.success) {
           rawDiff = msg.data;
-          renderDiff(rawDiff, currentMode);
+          renderDiff(rawDiff, mode);
           btnCopy.disabled = rawDiff.length === 0;
         } else {
           rawDiff = '';
           btnCopy.disabled = true;
-          setStatus('codicon-error', 'Error loading diff', 'status-error');
-          emptyState.querySelector('.empty-icon').className = 'codicon codicon-warning empty-icon';
-          emptyStatePrimary.textContent = msg.data;
-          emptyStateSecondary.textContent = '';
-          emptyStateSecondary.style.display = 'none';
-          emptyState.style.display = 'flex';
-          diffOutput.style.display = 'none';
-          statsRow.style.display = 'none';
+          setStatus('Error loading diff', 'error');
+          showEmptyState(msg.data, '');
         }
       }
     });
@@ -581,7 +626,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     function createLine(gutterText, contentText, typeClass) {
       const el = document.createElement('div');
-      el.className = \`line \${typeClass}\`;
+      el.className = 'line ' + typeClass;
 
       const gutter = document.createElement('div');
       gutter.className = 'line-gutter';
@@ -604,7 +649,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
       if (!text.trim()) {
         showEmptyState(EMPTY_MESSAGES[mode] || EMPTY_MESSAGES.all);
-        setStatus('codicon-check', EMPTY_MESSAGES[mode] || EMPTY_MESSAGES.all, 'status-success');
+        setStatus(EMPTY_MESSAGES[mode] || EMPTY_MESSAGES.all, 'success');
         return;
       }
 
@@ -649,7 +694,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       statAdd.textContent = additions;
       statDel.textContent = deletions;
       statsRow.style.display = 'flex';
-      setStatus('codicon-check', \`Loaded \${getModeLabel(mode)}.\`, 'status-success');
+      setStatus('Loaded ' + getModeLabel(mode) + '.', 'success');
     }
   </script>
 </body>
