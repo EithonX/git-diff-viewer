@@ -27,15 +27,10 @@ jobs:
         run: npm run compile
 
       - name: Package Extension
-        run: npx vsce package --allow-missing-repository
-
-      - name: Find VSIX file
-        id: get_vsix
-        # Grabs the exact name of the generated vsix file to pass to the next step
-        run: echo "VSIX_FILE=$(ls *.vsix | head -n 1)" >> $GITHUB_ENV
+        run: npx vsce package --allow-missing-repository -o git-diff-viewer.vsix
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ env.VSIX_FILE }}
+          files: git-diff-viewer.vsix
           generate_release_notes: true # Auto-generates a changelog based on your commits
